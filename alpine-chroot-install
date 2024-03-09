@@ -181,7 +181,7 @@ gen_chroot_script() {
 		ENV_FILTER_REGEX='($(echo "$CHROOT_KEEP_VARS" | tr -s ' ' '|'))'
 	EOF
 	if [ -n "$QEMU_EMULATOR" ]; then
-		printf 'export QEMU_EMULATOR="%s"' "$QEMU_EMULATOR"
+		printf 'export QEMU_EMULATOR="%s"\n' "$QEMU_EMULATOR"
 	fi
 	cat <<-'EOF'
 
@@ -197,6 +197,25 @@ gen_chroot_script() {
 		export | sed -En "s/^([^=]+ ${ENV_FILTER_REGEX}=)('.*'|\".*\")$/\1\3/p" > "$tmpfile" || true
 
 		cd "$(dirname "$0")"
+
+		mountpoint -q proc || mount -v -t proc none proc
+		mountpoint -q sys || mount -v --rbind /sys sys
+		mount --make-rprivate sys
+		mountpoint -q dev || mount -v --rbind /dev dev
+		mount --make-rprivate dev
+
+	EOF
+	if [ -L /dev/shm ] && [ -d /run/shm ]; then
+		printf 'mountpoint -q run/shm || mount -v --bind /run/shm run/shm\n'
+		printf 'mount --make-private run/shm\n'
+	fi
+
+	if [ -d "$BIND_DIR" ]; then
+		printf 'mountpoint -q "%s%s" || mount -v --bind "%s" "%s%s"\n' "$CHROOT_DIR" "$BIND_DIR" "$BIND_DIR" "$CHROOT_DIR" "$BIND_DIR"
+		printf 'mount --make-private "%s%s"\n' "$CHROOT_DIR" "$BIND_DIR"
+	fi
+	cat <<-'EOF'
+
 		$_sudo mv "$tmpfile" env.sh
 		$_sudo chroot . /usr/bin/env -i su -l "$user" \
 		    sh -c ". /etc/profile; . /env.sh; cd '$oldpwd' 2>/dev/null; \"\$@\"" \
